@@ -61,12 +61,22 @@ async function scrapeProvider(providerName, url) {
   console.log(`\n[${providerName}] Scraping: ${url}`);
 
   const context = await browser.newContext({
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
     ignoreHTTPSErrors: true,
+    viewport: { width: 1280, height: 720 },
   });
-  const page = await context.newPage();
 
+  // האזן לכל הframes, לא רק לדף הראשי
+  context.on("page", (page) => {
+    page.on("request", (req) => {
+      const u = req.url();
+      if (u.includes(".m3u8")) {
+        console.log(`[${providerName}] 🎯 m3u8 in new page: ${u}`);
+      }
+    });
+  });
+
+  const page = await context.newPage();
   let hlsUrl = null;
   const subtitles = [];
 
@@ -74,12 +84,12 @@ async function scrapeProvider(providerName, url) {
     /\.(vtt|srt)(\?.*)?$/.test(u) || u.includes(".vtt") || u.includes(".srt");
 
   try {
-    // ── Intercept network requests ───────────────────────────────
+    // האזן לכל הrequests כולל iframes
     await page.route("**/*", (route) => {
       const reqUrl = route.request().url();
       if (!hlsUrl && reqUrl.includes(".m3u8")) {
         hlsUrl = reqUrl;
-        console.log(`[${providerName}] ✅ HLS found: ${hlsUrl}`);
+        console.log(`[${providerName}] ✅ HLS: ${hlsUrl}`);
       }
       if (isSubtitle(reqUrl) && !subtitles.includes(reqUrl)) {
         subtitles.push(reqUrl);
@@ -89,65 +99,51 @@ async function scrapeProvider(providerName, url) {
 
     page.on("request", (req) => {
       const reqUrl = req.url();
+      if (!hlsUrl && reqUrl.includes(".m3u8")) {
+        hlsUrl = reqUrl;
+        console.log(`[${providerName}] ✅ HLS (req): ${hlsUrl}`);
+      }
       if (isSubtitle(reqUrl) && !subtitles.includes(reqUrl)) {
         subtitles.push(reqUrl);
       }
     });
 
-    // ── Load the page ────────────────────────────────────────────
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
+    // האזן גם לresponses
+    page.on("response", (resp) => {
+      const respUrl = resp.url();
+      if (!hlsUrl && respUrl.includes(".m3u8")) {
+        hlsUrl = respUrl;
+        console.log(`[${providerName}] ✅ HLS (resp): ${hlsUrl}`);
+      }
+    });
+
+    await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
     console.log(`[${providerName}] Page loaded`);
 
-    // ── Click strategy cascade ───────────────────────────────────
-    // We try multiple selectors in order. The first one that exists gets clicked.
-    // If none match we fall back to clicking the center of the page.
+    // חכה שהדף יתייצב
+    await page.waitForTimeout(2000);
 
-    const CLICK_SELECTORS = [
-      "#the_frame",          // vidsrc family
-      "iframe",              // generic iframe
-      ".play-button",        // common play button class
-      "[class*='play']",     // any element with 'play' in class
-      "video",               // direct video element
-      ".jw-display",         // JWPlayer
-      ".plyr__play-large",   // Plyr
-      "#player",             // generic player div
-      "body",                // last resort – click center of page
-    ];
+    // נסה ללחוץ על כל iframe קיים
+    const frames = page.frames();
+    console.log(`[${providerName}] Frames found: ${frames.length}`);
 
-    let clicked = false;
-    for (const selector of CLICK_SELECTORS) {
+    for (const frame of frames) {
       try {
-        const el = await page.$(selector);
-        if (!el) continue;
-
-        const box = await el.boundingBox();
-        if (box) {
-          const x = box.x + box.width  / 2;
-          const y = box.y + box.height / 2;
-          await page.mouse.move(x, y);
-          await page.mouse.click(x, y);
-          console.log(`[${providerName}] Clicked "${selector}" at (${x.toFixed(0)}, ${y.toFixed(0)})`);
-          clicked = true;
-          break;
-        } else {
-          // Element exists but has no box (e.g. hidden) – try JS click
-          await page.evaluate((sel) => document.querySelector(sel)?.click(), selector);
-          console.log(`[${providerName}] JS-clicked "${selector}"`);
-          clicked = true;
-          break;
-        }
-      } catch (_) {
-        // selector failed, try next
-      }
+        await frame.evaluate(() => {
+          const video = document.querySelector("video");
+          if (video) video.play();
+          const btn = document.querySelector(".play-button, [class*='play'], button");
+          if (btn) btn.click();
+        });
+      } catch (_) {}
     }
 
-    if (!clicked) {
-      console.warn(`[${providerName}] No clickable element found`);
-    }
-    
+    // לחץ על מרכז הדף
+    await page.mouse.click(640, 360);
     await page.waitForTimeout(3000);
+    await page.mouse.click(640, 360);
 
-    // ── Wait for HLS URL to appear (up to 12 seconds) ───────────
+    // חכה למציאת m3u8
     if (!hlsUrl) {
       await page
         .waitForResponse((resp) => resp.url().includes(".m3u8"), { timeout: 20000 })
@@ -157,6 +153,24 @@ async function scrapeProvider(providerName, url) {
           await page.waitForTimeout(3000);
         });
     }
+
+    if (subtitles.length === 0) {
+      await page.waitForTimeout(2000);
+    }
+
+    await page.close();
+    await context.close();
+
+    if (!hlsUrl) throw new Error("HLS URL not found");
+    return { hls_url: hlsUrl, subtitles, error: null };
+
+  } catch (error) {
+    await page.close().catch(() => {});
+    await context.close().catch(() => {});
+    console.error(`[${providerName}] ❌ ${error.message}`);
+    return { hls_url: null, subtitles: [], error: error.message };
+  }
+}
 
     // ── Extra wait for subtitles ─────────────────────────────────
     if (subtitles.length === 0) {
