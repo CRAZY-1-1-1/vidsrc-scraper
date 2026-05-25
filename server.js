@@ -7,11 +7,9 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Middleware
 app.use(express.json());
 app.use(express.static('public'));
 
-// ── CORS – allow the website to call this API from any origin ──
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -20,12 +18,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check endpoint for Railway
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Provider configurations with multiple servers
 const PROVIDERS = {
   vidplay: {
     baseUrl: 'https://vidplay.site',
@@ -73,7 +69,6 @@ const PROVIDERS = {
 
 let browser = null;
 
-// Initialize browser
 async function initBrowser() {
   if (!browser) {
     browser = await chromium.launch({
@@ -91,7 +86,6 @@ async function initBrowser() {
   return browser;
 }
 
-// Scrape function – intercepts network requests to catch m3u8/mp4 streams
 async function scrapeWithPlaywright(url, selector = 'body') {
   const bw = await initBrowser();
   const context = await bw.newContext({
@@ -102,7 +96,6 @@ async function scrapeWithPlaywright(url, selector = 'body') {
 
   const intercepted = new Set();
 
-  // ── Intercept every network request the page makes ──────────────────────
   context.on('request', (request) => {
     const u = request.url();
     if (/\.m3u8(\?|$)/i.test(u) || /\.mp4(\?|$)/i.test(u)) {
@@ -113,7 +106,6 @@ async function scrapeWithPlaywright(url, selector = 'body') {
   try {
     const page = await context.newPage();
 
-    // Also listen on the page level (catches sub-frame requests)
     page.on('request', (request) => {
       const u = request.url();
       if (/\.m3u8(\?|$)/i.test(u) || /\.mp4(\?|$)/i.test(u)) {
@@ -121,7 +113,6 @@ async function scrapeWithPlaywright(url, selector = 'body') {
       }
     });
 
-    // Route: block ads / trackers to speed things up
     await page.route('**/*', (route) => {
       const u = route.request().url();
       const blocked = [
@@ -140,13 +131,11 @@ async function scrapeWithPlaywright(url, selector = 'body') {
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 35000 });
 
-    // Wait up to 12 s for a stream URL to appear in network traffic
     const deadline = Date.now() + 12000;
     while (intercepted.size === 0 && Date.now() < deadline) {
       await page.waitForTimeout(500);
     }
 
-    // Also grab any links embedded in the HTML itself
     const htmlContent = await page.content();
     const text = await page.evaluate(() => document.body.innerText).catch(() => '');
 
@@ -165,9 +154,8 @@ async function scrapeWithPlaywright(url, selector = 'body') {
   }
 }
 
-// Extract video links from page content + intercepted streams
 function extractVideoLinks(content, interceptedStreams = []) {
-  const links = [...interceptedStreams]; // intercepted streams come first (most reliable)
+  const links = [...interceptedStreams];
   const patterns = [
     /(https?:\/\/[^\s\"]+\.m3u8[^\s\"]*)/gi,
     /(https?:\/\/[^\s\"]+\.mp4[^\s\"]*)/gi,
@@ -189,7 +177,6 @@ function extractVideoLinks(content, interceptedStreams = []) {
   return links;
 }
 
-// Main scrape endpoint
 app.get('/api/scrape', async (req, res) => {
   const { url, provider } = req.query;
   
@@ -218,7 +205,6 @@ app.get('/api/scrape', async (req, res) => {
   }
 });
 
-// Scrape all providers endpoint
 app.get('/api/scrape-all', async (req, res) => {
   const { query, type = 'movie' } = req.query;
   
@@ -264,7 +250,6 @@ app.get('/api/scrape-all', async (req, res) => {
   });
 });
 
-// Get providers list
 app.get('/api/providers', (req, res) => {
   res.json({
     success: true,
@@ -276,7 +261,6 @@ app.get('/api/providers', (req, res) => {
   });
 });
 
-// Search specific provider
 app.get('/api/search/:provider', async (req, res) => {
   const { provider } = req.params;
   const { q } = req.query;
@@ -317,7 +301,6 @@ app.get('/api/search/:provider', async (req, res) => {
   });
 });
 
-// Direct embed endpoint
 app.get('/api/embed/:provider', async (req, res) => {
   const { provider } = req.params;
   const { id, tmdb } = req.query;
@@ -377,7 +360,6 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// Home page
 app.get('/', (req, res) => {
   res.send(`
 <!DOCTYPE html>
@@ -434,20 +416,17 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Error handling
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: err.message });
 });
 
-// Start server
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running at http://0.1.0.0:${PORT}`);
   console.log(`📊 Health check: http://0.1.0.0:${PORT}/health`);
   console.log(`🎬 Providers: ${Object.keys(PROVIDERS).join(', ')}`);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully');
   if (browser) await browser.close();
