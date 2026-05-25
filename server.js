@@ -21,9 +21,6 @@ export const headers = {
 app.use(cors());
 app.use(json());
 
-// ─────────────────────────────────────────────────────────────────
-//  Providers – each entry defines how to build the embed URL
-// ─────────────────────────────────────────────────────────────────
 const PROVIDERS = [
   {
     name: "vidsrcme",
@@ -40,23 +37,10 @@ const PROVIDERS = [
 export const LANGUAGE_NAMES = { en: "English" };
 export const COMMON_LANGUAGES = Object.keys(LANGUAGE_NAMES);
 
-// Global browser instance, launched once
 let browser;
-
-// Simple 15-minute in-memory cache
 const cache = new Map();
-
-// Max 2 providers scraped at the same time
 const limit = pLimit(2);
 
-// ─────────────────────────────────────────────────────────────────
-//  Generic scraper – works across all providers
-//  Strategy:
-//    1. Intercept all .m3u8 network requests
-//    2. Load the page
-//    3. Try a cascade of click strategies until HLS is found
-//    4. Return whatever was captured
-// ─────────────────────────────────────────────────────────────────
 async function scrapeProvider(providerName, url) {
   console.log(`\n[${providerName}] Scraping: ${url}`);
 
@@ -66,12 +50,10 @@ async function scrapeProvider(providerName, url) {
     viewport: { width: 1280, height: 720 },
   });
 
-  // האזן לכל הframes, לא רק לדף הראשי
-  context.on("page", (page) => {
-    page.on("request", (req) => {
-      const u = req.url();
-      if (u.includes(".m3u8")) {
-        console.log(`[${providerName}] 🎯 m3u8 in new page: ${u}`);
+  context.on("page", (p) => {
+    p.on("request", (req) => {
+      if (req.url().includes(".m3u8")) {
+        console.log(`[${providerName}] 🎯 m3u8 in new page: ${req.url()}`);
       }
     });
   });
@@ -84,7 +66,6 @@ async function scrapeProvider(providerName, url) {
     /\.(vtt|srt)(\?.*)?$/.test(u) || u.includes(".vtt") || u.includes(".srt");
 
   try {
-    // האזן לכל הrequests כולל iframes
     await page.route("**/*", (route) => {
       const reqUrl = route.request().url();
       if (!hlsUrl && reqUrl.includes(".m3u8")) {
@@ -108,7 +89,6 @@ async function scrapeProvider(providerName, url) {
       }
     });
 
-    // האזן גם לresponses
     page.on("response", (resp) => {
       const respUrl = resp.url();
       if (!hlsUrl && respUrl.includes(".m3u8")) {
@@ -120,10 +100,8 @@ async function scrapeProvider(providerName, url) {
     await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
     console.log(`[${providerName}] Page loaded`);
 
-    // חכה שהדף יתייצב
     await page.waitForTimeout(2000);
 
-    // נסה ללחוץ על כל iframe קיים
     const frames = page.frames();
     console.log(`[${providerName}] Frames found: ${frames.length}`);
 
@@ -138,12 +116,10 @@ async function scrapeProvider(providerName, url) {
       } catch (_) {}
     }
 
-    // לחץ על מרכז הדף
     await page.mouse.click(640, 360);
     await page.waitForTimeout(3000);
     await page.mouse.click(640, 360);
 
-    // חכה למציאת m3u8
     if (!hlsUrl) {
       await page
         .waitForResponse((resp) => resp.url().includes(".m3u8"), { timeout: 20000 })
@@ -172,33 +148,11 @@ async function scrapeProvider(providerName, url) {
   }
 }
 
-    // ── Extra wait for subtitles ─────────────────────────────────
-    if (subtitles.length === 0) {
-      await page.waitForTimeout(4000);
-    }
-
-    await page.close();
-    await context.close();
-
-    if (!hlsUrl) throw new Error("HLS URL not found");
-
-    return { hls_url: hlsUrl, subtitles, error: null };
-  } catch (error) {
-    await page.close().catch(() => {});
-    await context.close().catch(() => {});
-    console.error(`[${providerName}] ❌ ${error.message}`);
-    return { hls_url: null, subtitles: [], error: error.message };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────
-//  /extract  – tries all providers, returns first success
-// ─────────────────────────────────────────────────────────────────
 app.get("/extract", async (req, res) => {
-  const type     = req.query.type || "movie";
-  const tmdb_id  = req.query.tmdb_id;
-  const season   = req.query.season   ? parseInt(req.query.season)   : undefined;
-  const episode  = req.query.episode  ? parseInt(req.query.episode)  : undefined;
+  const type    = req.query.type || "movie";
+  const tmdb_id = req.query.tmdb_id;
+  const season  = req.query.season  ? parseInt(req.query.season)  : undefined;
+  const episode = req.query.episode ? parseInt(req.query.episode) : undefined;
 
   if (!tmdb_id) {
     return res.status(400).json({ success: false, error: "tmdb_id query param is required", results: {} });
@@ -218,9 +172,7 @@ app.get("/extract", async (req, res) => {
     const resultsArr = await Promise.all(
       PROVIDERS.map((p) =>
         limit(async () => {
-          const url = type === "tv"
-            ? p.tv(tmdb_id, season, episode)
-            : p.movie(tmdb_id);
+          const url = type === "tv" ? p.tv(tmdb_id, season, episode) : p.movie(tmdb_id);
           try {
             const result = await scrapeProvider(p.name, url);
             return [p.name, result];
@@ -234,16 +186,10 @@ app.get("/extract", async (req, res) => {
     const results = Object.fromEntries(resultsArr);
     const success = Object.values(results).some((r) => r.hls_url);
 
-    // Build a clean sources array from successful results
     const sources = Object.entries(results)
       .filter(([, r]) => r.hls_url)
-      .map(([name, r]) => ({
-        provider: name,
-        url:      r.hls_url,
-        quality:  "auto",
-      }));
+      .map(([name, r]) => ({ provider: name, url: r.hls_url, quality: "auto" }));
 
-    // Merge all subtitles found across providers (deduplicated)
     const allSubtitles = [
       ...new Map(
         Object.values(results)
@@ -253,7 +199,6 @@ app.get("/extract", async (req, res) => {
     ];
 
     const response = { success, sources, subtitles: allSubtitles, results };
-
     cache.set(cacheKey, { timestamp: Date.now(), response });
     res.json(response);
   } catch (err) {
@@ -261,9 +206,33 @@ app.get("/extract", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────
-//  Subtitle endpoints (unchanged from original)
-// ─────────────────────────────────────────────────────────────────
+app.get("/test-providers", async (req, res) => {
+  const urls = [
+    "https://vidsrcme.ru",
+    "https://vsembed.su",
+    "https://vsembed.ru",
+    "https://vsdash.net",
+    "https://vidlink.pro",
+    "https://vidsrc.rip",
+    "https://vidsrc.wtf",
+    "https://moviesapi.club",
+    "https://w1.moviesapi.club",
+  ];
+
+  const results = await Promise.all(
+    urls.map(async (url) => {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        return { url, ok: r.ok, status: r.status };
+      } catch (e) {
+        return { url, ok: false, error: e.message };
+      }
+    })
+  );
+
+  res.json(results);
+});
+
 async function getIMDbIdFromTMDB(tmdb_id, type = "movie") {
   const url      = `https://api.themoviedb.org/3/${type}/${tmdb_id}/external_ids?api_key=${TMDB_API_KEY}`;
   const response = await fetch(url, { headers });
@@ -284,9 +253,9 @@ async function searchSubtitles(imdb_id) {
   return data.data
     .filter((item) => item.attributes?.files?.[0]?.file_id && COMMON_LANGUAGES.includes(item.attributes.language))
     .map((item) => ({
-      language:      item.attributes.language,
-      language_name: LANGUAGE_NAMES[item.attributes.language] || item.attributes.language,
-      file_id:       item.attributes.files[0].file_id,
+      language:       item.attributes.language,
+      language_name:  LANGUAGE_NAMES[item.attributes.language] || item.attributes.language,
+      file_id:        item.attributes.files[0].file_id,
       download_count: item.attributes.download_count || 0,
     }))
     .sort((a, b) => b.download_count - a.download_count)
@@ -326,32 +295,6 @@ app.get("/movie-subtitles", async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
-
-app.get("/test-providers", async (req, res) => {
-const urls = [
-  "https://vidsrcme.ru",
-  "https://vsembed.su",
-  "https://vsembed.ru",
-  "https://vsdash.net",
-  "https://vidlink.pro",
-  "https://vidsrc.rip",
-  "https://vidsrc.wtf",
-  "https://moviesapi.club",
-  "https://w1.moviesapi.club",
-];
-  const results = await Promise.all(
-    urls.map(async (url) => {
-      try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
-        return { url, ok: r.ok, status: r.status };
-      } catch (e) {
-        return { url, ok: false, error: e.message };
-      }
-    })
-  );
-
-  res.json(results);
 });
 
 app.get("/tv-subtitles", async (req, res) => {
@@ -395,9 +338,6 @@ app.get("/", (req, res) => {
   res.send("🎬 VidSrc Scraper API is running. Visit /subtitles or /extract to use.");
 });
 
-// ─────────────────────────────────────────────────────────────────
-//  Bootstrap
-// ─────────────────────────────────────────────────────────────────
 (async () => {
   browser = await chromium.launch({ headless: true });
   app.listen(PORT, () => console.log(`🚀 Server running at http://localhost:${PORT}`));
