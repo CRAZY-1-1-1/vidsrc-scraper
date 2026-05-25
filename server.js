@@ -31,22 +31,12 @@ const PROVIDERS = [
     tv: (id, s, e) => `https://vidsrcme.ru/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
   },
   {
-    name: "vsembed",
-    movie: (id) => `https://vsembed.su/embed/movie/${id}`,
-    tv: (id, s, e) => `https://vsembed.su/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
-  },
-  {
-    name: "2embed",
-    movie: (id) => `https://2embed.cc/embed/movie/${id}`,
-    tv: (id, s, e) => `https://2embed.cc/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
-  },
-  {
     name: "vidlink",
     movie: (id) => `https://vidlink.pro/movie/${id}`,
     tv: (id, s, e) => `https://vidlink.pro/tv/${id}/${s}/${e}`,
   },
 ];
-  
+
 export const LANGUAGE_NAMES = { en: "English" };
 export const COMMON_LANGUAGES = Object.keys(LANGUAGE_NAMES);
 
