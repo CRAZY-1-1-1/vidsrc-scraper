@@ -91,41 +91,91 @@ async function initBrowser() {
   return browser;
 }
 
-// Scrape function
+// Scrape function – intercepts network requests to catch m3u8/mp4 streams
 async function scrapeWithPlaywright(url, selector = 'body') {
   const bw = await initBrowser();
   const context = await bw.newContext({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.1.0.0 Safari/537.36',
-    viewport: { width: 1920, height: 1080 }
+    viewport: { width: 1920, height: 1080 },
+    ignoreHTTPSErrors: true,
   });
-  
+
+  const intercepted = new Set();
+
+  // ── Intercept every network request the page makes ──────────────────────
+  context.on('request', (request) => {
+    const u = request.url();
+    if (/\.m3u8(\?|$)/i.test(u) || /\.mp4(\?|$)/i.test(u)) {
+      intercepted.add(u);
+    }
+  });
+
   try {
     const page = await context.newPage();
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForTimeout(2000);
-    
-    const content = await page.content();
-    const text = await page.evaluate(() => document.body.innerText);
-    
+
+    // Also listen on the page level (catches sub-frame requests)
+    page.on('request', (request) => {
+      const u = request.url();
+      if (/\.m3u8(\?|$)/i.test(u) || /\.mp4(\?|$)/i.test(u)) {
+        intercepted.add(u);
+      }
+    });
+
+    // Route: block ads / trackers to speed things up
+    await page.route('**/*', (route) => {
+      const u = route.request().url();
+      const blocked = [
+        'googlesyndication', 'doubleclick', 'adservice', 'google-analytics',
+        'googletagmanager', 'facebook.net', 'amazon-adsystem', 'adnxs',
+        'rubiconproject', 'openx', 'pubmatic', 'criteo', 'taboola', 'outbrain',
+        'popads', 'popcash', 'propellerads', 'exoclick', 'trafficjunky',
+        'juicyads', 'hilltopads', 'adsterra', 'monetag',
+      ];
+      if (blocked.some((b) => u.includes(b))) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 35000 });
+
+    // Wait up to 12 s for a stream URL to appear in network traffic
+    const deadline = Date.now() + 12000;
+    while (intercepted.size === 0 && Date.now() < deadline) {
+      await page.waitForTimeout(500);
+    }
+
+    // Also grab any links embedded in the HTML itself
+    const htmlContent = await page.content();
+    const text = await page.evaluate(() => document.body.innerText).catch(() => '');
+
     await page.close();
-    return { content, text, success: true };
+    await context.close();
+
+    return {
+      content: htmlContent,
+      text,
+      success: true,
+      interceptedStreams: [...intercepted],
+    };
   } catch (error) {
     await context.close();
     throw error;
   }
 }
 
-// Extract video links from page content
-function extractVideoLinks(content) {
-  const links = [];
+// Extract video links from page content + intercepted streams
+function extractVideoLinks(content, interceptedStreams = []) {
+  const links = [...interceptedStreams]; // intercepted streams come first (most reliable)
   const patterns = [
     /(https?:\/\/[^\s\"]+\.m3u8[^\s\"]*)/gi,
     /(https?:\/\/[^\s\"]+\.mp4[^\s\"]*)/gi,
     /["'](https?:\/\/[^"']+\/e\/[^"']+)["']/gi,
     /["'](https?:\/\/[^"']+\/embed\/[^"']+)["']/gi,
-    /["'](https?:\/\/[^"']+\/v\/[^"']+)["']/gi
+    /["'](https?:\/\/[^"']+\/v\/[^"']+)["']/gi,
   ];
-  
+
   for (const pattern of patterns) {
     const matches = content.matchAll(pattern);
     for (const match of matches) {
@@ -135,7 +185,7 @@ function extractVideoLinks(content) {
       }
     }
   }
-  
+
   return links;
 }
 
@@ -149,7 +199,7 @@ app.get('/api/scrape', async (req, res) => {
   
   try {
     const result = await scrapeWithPlaywright(url);
-    const videoLinks = extractVideoLinks(result.content);
+    const videoLinks = extractVideoLinks(result.content, result.interceptedStreams);
     
     res.json({
       success: true,
@@ -183,7 +233,7 @@ app.get('/api/scrape-all', async (req, res) => {
       try {
         const searchUrl = `https://${server}${config.searchPath}${encodeURIComponent(query)}`;
         const result = await scrapeWithPlaywright(searchUrl);
-        const videoLinks = extractVideoLinks(result.content);
+        const videoLinks = extractVideoLinks(result.content, result.interceptedStreams);
         
         if (videoLinks.length > 0) {
           results.push({
@@ -242,7 +292,7 @@ app.get('/api/search/:provider', async (req, res) => {
     try {
       const searchUrl = `https://${server}${config.searchPath}${encodeURIComponent(q)}`;
       const result = await scrapeWithPlaywright(searchUrl);
-      const videoLinks = extractVideoLinks(result.content);
+      const videoLinks = extractVideoLinks(result.content, result.interceptedStreams);
       
       results.push({
         server,
@@ -291,7 +341,7 @@ app.get('/api/embed/:provider', async (req, res) => {
     
     try {
       const result = await scrapeWithPlaywright(embedUrl);
-      const videoLinks = extractVideoLinks(result.content);
+      const videoLinks = extractVideoLinks(result.content, result.interceptedStreams);
       
       embedUrls.push({
         server,
