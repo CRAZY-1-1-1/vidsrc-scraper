@@ -393,7 +393,7 @@ process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully');
   if (browser) await browser.close();
   server.close(() => {
-    process.exit(1);
+    process.exit(0);
   });
 });
 
