@@ -27,31 +27,21 @@ app.use(json());
 const PROVIDERS = [
   {
     name: "vidsrcme",
-    movie: (id)              => `https://vidsrcme.ru/embed/movie/${id}`,
-    tv:    (id, s, e)        => `https://vidsrcme.ru/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
+    movie: (id) => `https://vidsrcme.ru/embed/movie/${id}`,
+    tv: (id, s, e) => `https://vidsrcme.ru/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
   },
   {
-    name: "primewire",
-    movie: (id)              => `https://www.primewire.pw/embed/movie?tmdb=${id}`,
-    tv:    (id, s, e)        => `https://www.primewire.pw/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
+    name: "autoembed",
+    movie: (id) => `https://player.autoembed.cc/embed/movie/${id}`,
+    tv: (id, s, e) => `https://player.autoembed.cc/embed/tv/${id}/${s}/${e}`,
   },
   {
-    name: "xpass",
-    movie: (id)              => `https://play.xpass.top/e/movie/${id}?autostart=true`,
-    tv:    (id, s, e)        => `https://play.xpass.top/e/tv/${id}/${s}/${e}?autostart=false`,
-  },
-  {
-    name: "vidking",
-    movie: (id)              => `https://www.vidking.net/embed/movie/${id}?color=aaaaaa&autoPlay=true`,
-    tv:    (id, s, e)        => `https://www.vidking.net/embed/tv/${id}/${s}/${e}?color=aaaaaa&autoPlay=true`,
-  },
-  {
-    name: "nhdapi",
-    movie: (id)              => `https://player.nhdapi.com/movie/${id}?path=movie/${id}`,
-    tv:    (id, s, e)        => `https://player.nhdapi.com/tv/${id}/${s}/${e}?path=tv/${id}/${s}/${e}`,
+    name: "multiembed",
+    movie: (id) => `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1`,
+    tv: (id, s, e) => `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1&s=${s}&e=${e}`,
   },
 ];
-
+  
 export const LANGUAGE_NAMES = { en: "English" };
 export const COMMON_LANGUAGES = Object.keys(LANGUAGE_NAMES);
 
@@ -159,13 +149,18 @@ async function scrapeProvider(providerName, url) {
     if (!clicked) {
       console.warn(`[${providerName}] No clickable element found`);
     }
+    
+    await page.waitForTimeout(3000);
 
     // ── Wait for HLS URL to appear (up to 12 seconds) ───────────
     if (!hlsUrl) {
       await page
-        .waitForResponse((resp) => resp.url().includes(".m3u8"), { timeout: 12000 })
+        .waitForResponse((resp) => resp.url().includes(".m3u8"), { timeout: 20000 })
         .then((resp) => { hlsUrl = resp.url(); })
-        .catch(() => console.warn(`[${providerName}] .m3u8 not detected within 12s`));
+        .catch(async () => {
+          console.warn(`[${providerName}] .m3u8 not detected within 20s`);
+          await page.waitForTimeout(3000);
+        });
     }
 
     // ── Extra wait for subtitles ─────────────────────────────────
