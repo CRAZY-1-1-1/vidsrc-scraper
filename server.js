@@ -329,15 +329,17 @@ app.get("/movie-subtitles", async (req, res) => {
 });
 
 app.get("/test-providers", async (req, res) => {
-  const urls = [
-    "https://vidsrcme.ru",
-    "https://vsembed.su", 
-    "https://2embed.cc",
-    "https://vidlink.pro",
-    "https://embed.su",
-    "https://vidsrc.cc",
-  ];
-
+const urls = [
+  "https://vidsrcme.ru",
+  "https://vsembed.su",
+  "https://vsembed.ru",
+  "https://vsdash.net",
+  "https://vidlink.pro",
+  "https://vidsrc.rip",
+  "https://vidsrc.wtf",
+  "https://moviesapi.club",
+  "https://w1.moviesapi.club",
+];
   const results = await Promise.all(
     urls.map(async (url) => {
       try {
