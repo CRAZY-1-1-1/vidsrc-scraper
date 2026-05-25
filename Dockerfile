@@ -1,20 +1,21 @@
-# Use the latest Playwright image that includes all browsers
-FROM mcr.microsoft.com/playwright:v1.52.0
+FROM mcr.microsoft.com/playwright:v1.52.0-jammy
 
-# Set working directory
 WORKDIR /app
 
-# Copy package.json and package-lock.json
+# Install deps first for better layer caching
 COPY package*.json ./
+RUN npm install --omit=dev --ignore-scripts \
+    && npx playwright install --with-deps chromium
 
-# Install dependencies
-RUN npm install
-
-# Copy source files
 COPY . .
 
-# Expose port (match your app port)
-EXPOSE 3000
+ENV NODE_ENV=production
+ENV PORT=4000
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Start app
-CMD ["npm", "start"]
+EXPOSE 4000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+  CMD wget -qO- http://localhost:${PORT}/health || exit 1
+
+CMD ["node", "server.js"]
