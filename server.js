@@ -31,14 +31,19 @@ const PROVIDERS = [
     tv: (id, s, e) => `https://vidsrcme.ru/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
   },
   {
-    name: "autoembed",
-    movie: (id) => `https://player.autoembed.cc/embed/movie/${id}`,
-    tv: (id, s, e) => `https://player.autoembed.cc/embed/tv/${id}/${s}/${e}`,
+    name: "vsembed",
+    movie: (id) => `https://vsembed.su/embed/movie/${id}`,
+    tv: (id, s, e) => `https://vsembed.su/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
   },
   {
-    name: "multiembed",
-    movie: (id) => `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1`,
-    tv: (id, s, e) => `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1&s=${s}&e=${e}`,
+    name: "2embed",
+    movie: (id) => `https://2embed.cc/embed/movie/${id}`,
+    tv: (id, s, e) => `https://2embed.cc/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
+  },
+  {
+    name: "vidlink",
+    movie: (id) => `https://vidlink.pro/movie/${id}`,
+    tv: (id, s, e) => `https://vidlink.pro/tv/${id}/${s}/${e}`,
   },
 ];
   
