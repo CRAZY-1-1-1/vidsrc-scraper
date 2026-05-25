@@ -319,6 +319,30 @@ app.get("/movie-subtitles", async (req, res) => {
   }
 });
 
+app.get("/test-providers", async (req, res) => {
+  const urls = [
+    "https://vidsrcme.ru",
+    "https://vsembed.su", 
+    "https://2embed.cc",
+    "https://vidlink.pro",
+    "https://embed.su",
+    "https://vidsrc.cc",
+  ];
+
+  const results = await Promise.all(
+    urls.map(async (url) => {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        return { url, ok: r.ok, status: r.status };
+      } catch (e) {
+        return { url, ok: false, error: e.message };
+      }
+    })
+  );
+
+  res.json(results);
+});
+
 app.get("/tv-subtitles", async (req, res) => {
   const { title, season, episode, type } = req.query;
   try {
