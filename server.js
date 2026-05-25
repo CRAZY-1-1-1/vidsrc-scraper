@@ -93,7 +93,7 @@ async function scrapeWithPlaywright(url, selector = 'body') {
   try {
     const page = await context.newPage();
     await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForTimeout(200  0);
+    await page.waitForTimeout(2000);
     
     const content = await page.content();
     const text = await page.evaluate(() => document.body.innerText);
@@ -309,9 +309,6 @@ app.get('/api/embed/:provider', async (req, res) => {
 });
 
 // ─── CrzFlix API endpoints ────────────────────────────────────────────────────
-// These routes are called by crzflix-api.js from the frontend.
-// They try every provider in order and return the first working stream.
-
 async function fetchSourcesForTmdb(tmdbId, season = null, episode = null) {
   const providerOrder = ['vidsrc', 'vidplay', 'embedsu', 'autoembed', 'moviesapi', 'smashy', 'vidstream'];
 
@@ -322,18 +319,14 @@ async function fetchSourcesForTmdb(tmdbId, season = null, episode = null) {
     for (const server of config.servers) {
       let embedUrl;
       if (season !== null && episode !== null) {
-        // TV episode
         embedUrl = `https://${server}/embed/tv/${tmdbId}/${season}/${episode}`;
       } else {
-        // Movie
         embedUrl = `https://${server}/embed/movie/${tmdbId}`;
       }
 
       try {
         const result = await scrapeWithPlaywright(embedUrl);
         const videoLinks = extractVideoLinks(result.content);
-
-        // Filter to only real stream URLs (.m3u8 or .mp4)
         const streams = videoLinks.filter(u => u.includes('.m3u8') || u.includes('.mp4'));
 
         if (streams.length > 0) {
@@ -347,7 +340,6 @@ async function fetchSourcesForTmdb(tmdbId, season = null, episode = null) {
           };
         }
       } catch (err) {
-        // This provider/server failed – try the next one
         console.warn(`[CrzFlix] ${server} failed: ${err.message}`);
       }
     }
@@ -356,7 +348,6 @@ async function fetchSourcesForTmdb(tmdbId, season = null, episode = null) {
   return { sources: [], subtitles: [] };
 }
 
-// Movie endpoint: GET /movie/:tmdbId
 app.get('/movie/:tmdbId', async (req, res) => {
   const { tmdbId } = req.params;
   try {
@@ -370,7 +361,6 @@ app.get('/movie/:tmdbId', async (req, res) => {
   }
 });
 
-// TV endpoint: GET /tv/:tmdbId/:season/:episode
 app.get('/tv/:tmdbId/:season/:episode', async (req, res) => {
   const { tmdbId, season, episode } = req.params;
   try {
